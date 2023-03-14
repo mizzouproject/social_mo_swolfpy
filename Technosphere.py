@@ -64,7 +64,16 @@ class Technosphere:
                             type='economic', location='US').save()
             db.new_activity(code='Material_Cost', name="Material Cost", unit='USD', categories=('economic',),
                             type='economic', location='US').save()
-
+        
+        #social indicator test
+        if len(db.search('social test')) == 0:
+            db.new_activity(code='Social_test1', name="Social test 1", unit='USD', categories=('social',),
+                            type='economic', location='US').save() 
+            db.new_activity(code='Social_test2', name="Social test 2", unit='USD', categories=('social',),
+                            type='economic', location='US').save()
+            db.new_activity(code='Social_test3', name="Social test 3", unit='USD', categories=('social',),
+                            type='economic', location='US').save()
+                            
         # adding swolf methods
         import_methods()
 
