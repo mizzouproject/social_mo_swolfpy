@@ -13,7 +13,7 @@ Or visit the GitHub project space at https://github.com/SwolfPy-Project
 Swolfpy module is based on Sardarmehni, et al. (2022). Add the social metrics values as new activities in the technosphere database.
 
 ## Branches
-version_1.0 : includes metrics for process models LF, MRF, Comp, WTE and AD.
-withcollection_v1 : social metrics for process models added in version_1.0 plus collection process
+- version_1.0 : includes metrics for process models LF, MRF, Comp, WTE and AD.
+- withcollection_v1 : social metrics for process models added in version_1.0 plus collection process
 
 
