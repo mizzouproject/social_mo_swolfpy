@@ -8,6 +8,7 @@ from .Technosphere import Technosphere
 from .Project import Project
 from .swolfpy_method import import_methods
 from .Optimization import Optimization
+from .MultiOptimization import MultiOptimization
 from .Monte_Carlo import Monte_Carlo
 from .UI.PySWOLF_run import MyQtApp
 from PySide2 import QtWidgets
@@ -22,6 +23,7 @@ __all__ = ['Technosphere',
            'Project',
            'import_methods',
            'Optimization',
+           'MultiOptimization',
            'Monte_Carlo',
            'MyQtApp',
            'swolfpy']
