@@ -7,7 +7,6 @@ Created on Thu Jul 20 11:22:00 2023
 from .Optimization import Optimization
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
 import plotly.graph_objects as go
 from plotly.offline import plot
 from copy import deepcopy
@@ -23,6 +22,11 @@ from brightway2 import projects
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize as MultiObjMinimize
 from pymoo.problems.functional import FunctionalProblem
+from pymoo.operators.sampling.lhs import LHS
+from pymoo.operators.mutation.pm import PolynomialMutation
+from pymoo.operators.crossover.sbx import SBX
+
+import shutup; shutup.please()
 
 class MultiOptimization():
     """
@@ -60,8 +64,9 @@ class MultiOptimization():
             optElem.set_config(self.configArray)            
         self.n_var = len(self.optimization_list[0].project.parameters_list) + self.optimization_list[0].n_scheme_vars
             
-    def multi_obj_optimization(self, constraints=None, collection=False, n_iter=30,
-                                 nproc=None, timeout=None, initialize_guess='random'):
+    def multi_obj_optimization(self, constraints=None, collection=False, pop_size=30,
+                                 n_offsprings=None, eliminate_duplicates=True, 
+                                 termination=40, seed=1, verbose=True):
         """
         Initialization of each Optimization object inside the optimization_list
         """
@@ -98,11 +103,22 @@ class MultiOptimization():
         """
         Setup of the Algorithm
         """  
-
+        algorithm = NSGA2(pop_size=pop_size,
+                    sampling=LHS(),
+                    crossover=SBX(),
+                    mutation=PolynomialMutation(),
+                    n_offsprings=n_offsprings,
+                    eliminate_duplicates=eliminate_duplicates)
         """
         Minimize
         """  
+        res = MultiObjMinimize(problem=problem,
+                                algorithm=algorithm,
+                                termination=('n_gen', termination),
+                                seed=seed,
+                                verbose=verbose)
 
+        return res
     
     def get_variables(self):
         print(self.n_var)
