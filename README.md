@@ -15,5 +15,6 @@ Swolfpy module is based on Sardarmehni, et al. (2022). Add the social metrics va
 ## Branches
 - version_1.0 : includes metrics for process models LF, MRF, Comp, WTE and AD.
 - withcollection_v1 : social metrics for process models added in version_1.0 plus collection process
+- optimization_v1 : multi-objective optimization class is added using pymoo library
 
 
