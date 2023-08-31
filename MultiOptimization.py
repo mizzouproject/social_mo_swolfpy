@@ -25,6 +25,8 @@ from pymoo.problems.functional import FunctionalProblem
 from pymoo.operators.sampling.lhs import LHS
 from pymoo.operators.mutation.pm import PolynomialMutation
 from pymoo.operators.crossover.sbx import SBX
+from pymoo.visualization.scatter import Scatter
+from pymoo.core.repair import Repair
 
 import shutup; shutup.please()
 
@@ -63,21 +65,26 @@ class MultiOptimization():
         for optElem in self.optimization_list:
             optElem.set_config(self.configArray)            
         self.n_var = len(self.optimization_list[0].project.parameters_list) + self.optimization_list[0].n_scheme_vars
-            
-    def multi_obj_optimization(self, constraints=None, collection=False, pop_size=30,
-                                 n_offsprings=None, eliminate_duplicates=True, 
-                                 termination=40, seed=1, verbose=True):
-        """
-        Initialization of each Optimization object inside the optimization_list
-        """
+
+    def set_constraints(self, constraints=None, collection=False):
         for optElem in self.optimization_list:
             optElem.oldx = [0 for i in range(self.n_var)]
             optElem.magnitude = len(str(int(abs(optElem.score))))
             optElem.constraints = constraints
             optElem.collection = collection
-            optElem.cons = optElem._create_constraints()
+            optElem.cons = optElem._create_constraints(inverse=-1)
         self.cons = self.optimization_list[0].cons
-    
+
+    def multi_obj_optimization(self, constraints=None, collection=False, pop_size=30,
+                                 n_offsprings=None, eliminate_duplicates=True, 
+                                 termination=40, seed=1, verbose=True, 
+                                 repair=False, verbose_repair=False):
+        """
+        Initialization of each Optimization object inside the optimization_list
+        """   
+        if len(self.cons) == 0 or constraints != None or collection != False:
+            self.set_constraints(constraints, collection)
+
         for constraint in self.cons:
             if constraint['type'] == 'eq':
                 self.constr_eq.append(constraint['fun'])
@@ -100,6 +107,15 @@ class MultiOptimization():
                                     constr_eq=self.constr_eq,
                                     xl=xl,
                                     xu=xu)
+
+        repairObject = None
+        if repair:
+            equality_var_array = dict()        
+            for key in self.optimization_list[0].project.parameters.param_uncertainty_dict.keys():
+                equality_var_array[key] = len(self.optimization_list[0].project.parameters.param_uncertainty_dict[key])
+            repairObject = FractionSumOneRepair(equality_var_array=equality_var_array, verbose=verbose_repair)
+            print("Repair object created")
+
         """
         Setup of the Algorithm
         """  
@@ -108,7 +124,8 @@ class MultiOptimization():
                     crossover=SBX(),
                     mutation=PolynomialMutation(),
                     n_offsprings=n_offsprings,
-                    eliminate_duplicates=eliminate_duplicates)
+                    eliminate_duplicates=eliminate_duplicates,
+                    repair=repairObject)
         """
         Minimize
         """  
@@ -120,9 +137,38 @@ class MultiOptimization():
 
         return res
     
-    def get_variables(self):
-        print(self.n_var)
-        print("***************************")
-        print(self.constr_eq)
-        print("***************************")
-        print(self.constr_ieq)
+    def getScatter(values):        
+        Scatter().add(values).show()
+
+    
+
+class FractionSumOneRepair(Repair):
+
+    def __init__(self, equality_var_array, verbose = False):
+        self.equality_var_array = equality_var_array
+        self.verbose = verbose
+        super().__init__()
+
+    def _do(self, problem, Z, **kwargs):
+
+        # sum of parameters in each group should be one
+        Q = 1
+
+        if self.verbose:
+            print("******************INITIAL Z:")
+            print(Z)
+        # now repair each indvidiual i
+        for i in range(len(Z)):
+            z = Z[i]
+            index = 0
+            for j in self.equality_var_array:
+                N_param_Ingroup = self.equality_var_array[j]
+                sum_param_Ingroup = sum(z[k] for k in range(index, index + N_param_Ingroup))
+                if (np.isclose(sum_param_Ingroup, Q, rtol=1e-04) == False):
+                    for k in range(index, index + N_param_Ingroup):
+                        z[k] = z[k] / sum_param_Ingroup
+                index += N_param_Ingroup 
+        if self.verbose:
+            print("******************FINAL Z:")
+            print(Z)
+        return Z
