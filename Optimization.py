@@ -201,7 +201,7 @@ class Optimization(LCA_matrix):
         self.Param_index += N_param_Ingroup
         return f
 
-    def _create_inequality(self, key, limit, KeyType, ConstType):
+    def _create_inequality(self, key, limit, KeyType, ConstType, inverse=1):
         """
 
         :param key: process name, key for activtity in process or key for activity in biosphere
@@ -219,30 +219,30 @@ class Optimization(LCA_matrix):
 
         if KeyType == 'Process':
             if ConstType == '<=':
-                f = (lambda x: limit - self.get_mass_flow(key, KeyType, x))
+                f = (lambda x: (limit - self.get_mass_flow(key, KeyType, x)) * inverse)
             else:
-                f = (lambda x: self.get_mass_flow(key, KeyType, x) - limit)
+                f = (lambda x: (self.get_mass_flow(key, KeyType, x) - limit) * inverse)
             return f
 
         elif KeyType == 'WasteToProcess':
             if ConstType == '<=':
-                f = (lambda x: limit - self.get_mass_flow(key, KeyType, x))
+                f = (lambda x: (limit - self.get_mass_flow(key, KeyType, x)) * inverse)
             else:
-                f = (lambda x: self.get_mass_flow(key, KeyType, x) - limit)
+                f = (lambda x: (self.get_mass_flow(key, KeyType, x) - limit) * inverse)
             return f
 
         elif KeyType == 'Emission':
             if ConstType == '<=':
-                f = (lambda x: limit - self.get_emission_amount(key, x))
+                f = (lambda x: (limit - self.get_emission_amount(key, x)) * inverse)
             else:
-                f = (lambda x: self.get_emission_amount(key, x) - limit)
+                f = (lambda x: (self.get_emission_amount(key, x) - limit) * inverse)
             return f
 
         elif KeyType == 'Impact':
             if ConstType == '<=':
-                f = (lambda x: limit - self.get_impact_amount(key, x))
+                f = (lambda x: (limit - self.get_impact_amount(key, x)) * inverse)
             else:
-                f = (lambda x: self.get_impact_amount(key, x) - limit)
+                f = (lambda x: (self.get_impact_amount(key, x) - limit) * inverse)
             return f
 
     def _create_collection_constraints(self, cons):
@@ -270,7 +270,7 @@ class Optimization(LCA_matrix):
                      'fun': (lambda x: helper_sum(x, const_dict[k]) + fix - 1),
                      'Name': '{} main const'.format(k)})
 
-    def _create_constraints(self):
+    def _create_constraints(self, inverse=1):
         cons = list()
         group = dict()
 
@@ -293,7 +293,7 @@ class Optimization(LCA_matrix):
             for key in self.constraints.keys():
                 cons.append({'type': 'ineq',
                              'fun': self._create_inequality(key, self.constraints[key]['limit'], self.constraints[key]['KeyType'],
-                                                            self.constraints[key]['ConstType'])})
+                                                            self.constraints[key]['ConstType'], inverse=inverse)})
         return cons
 
     @staticmethod
