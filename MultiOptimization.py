@@ -27,6 +27,7 @@ import oapackage
 from oapackage.oahelper import create_pareto_element
 from sklearn import preprocessing
 
+from pymoo.util.running_metric import RunningMetric
 from pymoo.util.running_metric import RunningMetricAnimation
 
 class MultiOptimization():
@@ -60,6 +61,9 @@ class MultiOptimization():
         self.bw2_fu = bw2_fu
         self.has_result = False #boolean to know if the algorithm has a result (res.X exists)
         self.results = [] # to save the DataFrame of the function report_res()
+        self.has_history = False
+        self.running_data = None
+        self.igd = []
     
     def config(self, project):
         for optElem in self.optimization_list:
@@ -85,6 +89,7 @@ class MultiOptimization():
                                  repair=False, verbose_repair=False):
         number_of_results = 0
         self.results = []
+        self.has_history = save_history
         """
         Initialization of each Optimization object inside the optimization_list
         """   
@@ -225,10 +230,15 @@ class MultiOptimization():
         return(results)
 
     def test_pareto(self, value=None, show=False):
-        if value == None:
-            datapoints = self.res.F.T
-        else:
+        if value != None:
             datapoints = value
+        else:
+            if self.has_result:
+                datapoints = self.res.F.T
+            else:
+                print('No result to work with')
+                return
+            
         pareto = oapackage.ParetoMultiDoubleLong()
 
         for ii in range(0, datapoints.shape[1]):
@@ -376,8 +386,7 @@ class MultiOptimization():
             if len(error_individual) > 0:
                 print("Number of individual is not correct: expected a value between 1 and "+str(len(data_to_plot))+" -> "+str(error_individual))
                 return
-        ind = data_to_plot[['IND']].values
-        ind_values = self.helper_dataframe_to_tuple(ind, individual)
+        ind_values = self.helper_dataframe_to_tuple(value=data_to_plot[['IND']].values.tolist(), individual=individual)
 
         fig, ax = plt.subplots(figsize=(10,6))
 
@@ -389,7 +398,7 @@ class MultiOptimization():
         total = tuple(0 for _ in range(number_individuals))
         chart_data = []
         for c in column_names:
-            temp_chart_data = self.helper_dataframe_to_tuple(data_to_plot[[c]].values.tolist(), individual)
+            temp_chart_data = self.helper_dataframe_to_tuple(value=data_to_plot[[c]].values.tolist(), individual=individual)
             if current != None:
                 temp_chart_data = (current[c],) + temp_chart_data    
             chart_data.append(temp_chart_data)
@@ -414,7 +423,7 @@ class MultiOptimization():
         if show_diversion:
             ax2 = ax.twinx()
             ax2.set_ylim(0, 105)
-            diversion = self.helper_dataframe_to_tuple(data_to_plot[['Diversion']].values.tolist(), individual)
+            diversion = self.helper_dataframe_to_tuple(value=data_to_plot[['Diversion']].values.tolist(), individual=individual)
             if current_diversion != None:
                 diversion = (current_diversion,) + diversion
             ax2.plot(ind_values, diversion, marker='o', color='magenta', linewidth=2)
@@ -423,7 +432,7 @@ class MultiOptimization():
         
         plt.show()
         
-    def helper_dataframe_to_tuple(value, individual=None):
+    def helper_dataframe_to_tuple(self, value, individual=None):
         res = ()
         for ii in range(len(value)):
             if individual != None:
@@ -432,6 +441,106 @@ class MultiOptimization():
             else:
                 res += (value[ii][0],)
         return res
+    
+    def get_history(self):
+        if self.has_history == False:
+            print("No history was saved on the result object of the algorithm")
+            return
+            
+        history = self.res.history  # extract information from save history flag
+        
+        n_evals = []             # corresponding number of function evaluations\
+        hist_F = []              # the objective space values in each generation
+        hist_cv = []             # constraint violation in each generation
+        hist_cv_avg = []         # average constraint violation in the whole population
+        
+        for algo in history:
+        
+            # store the number of function evaluations
+            n_evals.append(algo.evaluator.n_eval)
+        
+            # retrieve the optimum from the algorithm
+            optmulti= algo.opt
+        
+            # store the least contraint violation and the average in each population
+            hist_cv.append(optmulti.get("CV").min())
+            hist_cv_avg.append(algo.pop.get("CV").mean())
+        
+            # filter out only the feasible and append and objective space values
+            feas = np.where(optmulti.get("feasible"))[0]
+            hist_F.append(optmulti.get("F")[feas])
+
+        return {
+                    'n_evals': n_evals,             
+                    'hist_F': hist_F,              
+                    'hist_cv': hist_cv,
+                    'hist_cv_avg': hist_cv_avg
+                }
+    
+    def constraint_satisfaction(self, type):
+        if self.has_history == False:
+            print("No history was saved on the result object of the algorithm")
+            return
+        history = self.get_history()
+        n_evals = history['n_evals']
+
+        plt.figure(figsize=(7, 5))
+        
+        if type == 'cv_avg': # Avg. CV of Pop
+            # analyze the population
+            vals_cv_avg = history['hist_cv_avg']
+            k_cv_avg = np.where(np.array(vals_cv_avg) <= 0.0)[0].min()
+            plt.plot(n_evals, vals_cv_avg,  color='black', lw=0.7, label="Avg. CV of Pop")
+            plt.scatter(n_evals, vals_cv_avg,  facecolor="none", edgecolor='black', marker="p")
+            plt.axvline(n_evals[k_cv_avg], color="red", label="All Feasible", linestyle="--")
+            plt.suptitle("Convergence")
+            plt.title(f"Whole population feasible in Generation {k_cv_avg} after {n_evals[k_cv_avg]} evaluations.", fontsize=10)
+            plt.xlabel("Function Evaluations")
+            
+        elif type == 'cv': # CV of Gen
+            # analyze the least feasible optimal solution
+            vals_cv = history['hist_cv']
+            k_cv = np.where(np.array(vals_cv) <= 0.0)[0].min()
+            plt.plot(n_evals, vals_cv,  color='black', lw=0.7, label="CV of Gen")
+            plt.scatter(n_evals, vals_cv,  facecolor="none", edgecolor='black', marker="p")
+            plt.axvline(n_evals[k_cv], color="red", label="At least one feasible", linestyle="--")
+            plt.suptitle("Convergence")
+            plt.title(f"At least feasible optimal solution in Generation {k_cv} after {n_evals[k_cv]} evaluations.", fontsize=10)
+            plt.xlabel("Function Evaluations")
+        else:
+            print('Invalid type, types allowed: cv, cv_avg')
+            return
+
+        plt.legend()
+                
+        # Display the plot
+        plt.show()
+    
+    def running_metric(self, delta_gen, n_plots, gen=None):
+        if self.has_history == False:
+            print("No history was saved on the result object of the algorithm")
+            return
+        running = RunningMetricAnimation(delta_gen=delta_gen,
+                        n_plots=n_plots,
+                        key_press=False,
+                        do_show=True)
+        if gen != None:
+            if gen > len(self.res.history) or gen < 1:
+                print("Generation "+str(gen)+" is out of range, value allowed between 1 and "+str(len(self.res.history)))
+                return
+            else:
+                history = self.res.history[:gen]
+        else:
+            history = self.res.history
+
+        for algorithm in history:
+            running.update(algorithm)
+
+        self.running_data = running.data
+
+        self.igd = []
+        for rd in running.data:
+            self.igd.append({'tau':rd[0], 'igd':rd[2][-2]})
    
 class FractionSumOneRepair(Repair):
 
