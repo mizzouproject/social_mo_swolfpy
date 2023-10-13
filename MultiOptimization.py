@@ -18,6 +18,7 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.visualization.scatter import Scatter
 from pymoo.core.repair import Repair
+from pymoo.core.result import Result
 
 import shutup; shutup.please()
 from datetime import datetime
@@ -29,6 +30,11 @@ from sklearn import preprocessing
 
 from pymoo.util.running_metric import RunningMetric
 from pymoo.util.running_metric import RunningMetricAnimation
+
+import json
+from json import JSONEncoder
+
+from .Topsis import Topsis
 
 class MultiOptimization():
     """
@@ -43,6 +49,7 @@ class MultiOptimization():
 
     """
     def __init__(self, functional_unit, method, project, bw2_fu):
+        self.tp = Topsis()
         self.optimization_list = []
         self.configArray = []
         self.objs = []
@@ -62,8 +69,13 @@ class MultiOptimization():
         self.has_result = False #boolean to know if the algorithm has a result (res.X exists)
         self.results = [] # to save the DataFrame of the function report_res()
         self.has_history = False
-        self.running_data = None
+        self.running_data = []
+        self.running_history = []
         self.igd = []
+        self.imported_from_json = False
+        self.history_data = dict()
+        self.result_topsis = []
+        self.individual_topsis = []
     
     def config(self, project):
         for optElem in self.optimization_list:
@@ -89,7 +101,11 @@ class MultiOptimization():
                                  repair=False, verbose_repair=False):
         number_of_results = 0
         self.results = []
-        self.has_history = save_history
+        self.has_result = False
+        self.has_history = False
+        self.imported_from_json = False
+        self.running_data = []
+        self.running_history = []
         """
         Initialization of each Optimization object inside the optimization_list
         """   
@@ -133,8 +149,8 @@ class MultiOptimization():
         """  
         algorithm = NSGA2(pop_size=pop_size,
                     sampling=LHS(),
-                    crossover=SBX(),
-                    mutation=PolynomialMutation(),
+                    crossover=SBX(prob=0.7), #eta=15, prob=0.9
+                    mutation=PolynomialMutation(prob=0.03), #prob=0.9, eta=20
                     n_offsprings=n_offsprings,
                     eliminate_duplicates=eliminate_duplicates,
                     repair=repairObject)
@@ -159,6 +175,7 @@ class MultiOptimization():
         try:
             number_of_results = len(res.X)
             self.has_result = True
+            self.has_history = save_history
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
@@ -264,6 +281,7 @@ class MultiOptimization():
         if len(error) > 0:
             print(error)
             return
+        
         fig, ax1 = plt.subplots()
 
         x = data_to_plot[x_name].values
@@ -274,12 +292,16 @@ class MultiOptimization():
         ax1.scatter(x, y1, c='g')
         ax2.scatter(x, y2, c='b')
         
-        ax1.set_xlabel(x_name)
-        ax1.set_ylabel(y1_name, color='g')
-        ax2.set_ylabel(y2_name, color='b')
+        x_label = results['unit'][x_name]
+        y1_label = results['unit'][y1_name]
+        y2_label = results['unit'][y2_name]
+
+        ax1.set_xlabel(x_name + ' (' + x_label + ')')
+        ax1.set_ylabel(y1_name + ' (' + y1_label + ')', color='g')
+        ax2.set_ylabel(y2_name + ' (' + y2_label + ')', color='b')
         
         # Display the plot
-        plt.show() 
+        plt.show()
 
     def dynamic_scatter_plot_3D(self, x_name, y_name, z_name):
         results = self.report_res()
@@ -299,6 +321,7 @@ class MultiOptimization():
         d4 = preprocessing.normalize(d3)
 
         # Plot
+        
         fig = plt.figure(figsize=(10, 7))
         ax = plt.axes(projection='3d')
 
@@ -342,7 +365,9 @@ class MultiOptimization():
                 ax = ax1[i]  
             ax.scatter(data_to_plot[c[0]], data_to_plot[c[1]])
             ax.set_title(c[0] + ' vs ' + c[1])
-            ax.set(xlabel=c[0], ylabel=c[1])
+            x_label = c[0] + ' (' + results['unit'][c[0]] + ')'
+            y_label = c[1] + ' (' + results['unit'][c[1]] + ')'
+            ax.set(xlabel=x_label, ylabel=y_label)
             i += 1
             
         figure.tight_layout()
@@ -379,6 +404,7 @@ class MultiOptimization():
                 print("Current variable has lenght of "+str(len(current))+", expected "+str(len(column_names)))
                 return
         error_individual = []
+        individuals = None
         if individual != None:
             for ind in individual:
                 if ind > len(data_to_plot) or ind < 1:
@@ -386,8 +412,18 @@ class MultiOptimization():
             if len(error_individual) > 0:
                 print("Number of individual is not correct: expected a value between 1 and "+str(len(data_to_plot))+" -> "+str(error_individual))
                 return
-        ind_values = self.helper_dataframe_to_tuple(value=data_to_plot[['IND']].values.tolist(), individual=individual)
+            individuals = individual
+        elif len(self.individual_topsis) > 0:
+            individuals = []
+            for ind in range(len(self.individual_topsis)):
+                for i in range(len(self.individual_topsis[ind])):
+                    if i in [0,1]:
+                        individuals.append(self.individual_topsis[ind][i])
+            individuals = np.unique(np.array(individuals)).tolist()
 
+        ind_values = self.helper_dataframe_to_tuple(value=data_to_plot[['IND']].values.tolist(), individual=individuals)
+
+        
         fig, ax = plt.subplots(figsize=(10,6))
 
         number_individuals = len(ind_values)
@@ -398,7 +434,7 @@ class MultiOptimization():
         total = tuple(0 for _ in range(number_individuals))
         chart_data = []
         for c in column_names:
-            temp_chart_data = self.helper_dataframe_to_tuple(value=data_to_plot[[c]].values.tolist(), individual=individual)
+            temp_chart_data = self.helper_dataframe_to_tuple(value=data_to_plot[[c]].values.tolist(), individual=individuals)
             if current != None:
                 temp_chart_data = (current[c],) + temp_chart_data    
             chart_data.append(temp_chart_data)
@@ -423,7 +459,7 @@ class MultiOptimization():
         if show_diversion:
             ax2 = ax.twinx()
             ax2.set_ylim(0, 105)
-            diversion = self.helper_dataframe_to_tuple(value=data_to_plot[['Diversion']].values.tolist(), individual=individual)
+            diversion = self.helper_dataframe_to_tuple(value=data_to_plot[['Diversion']].values.tolist(), individual=individuals)
             if current_diversion != None:
                 diversion = (current_diversion,) + diversion
             ax2.plot(ind_values, diversion, marker='o', color='magenta', linewidth=2)
@@ -443,11 +479,13 @@ class MultiOptimization():
         return res
     
     def get_history(self):
-        if self.has_history == False:
+        if self.has_history == False and self.imported_from_json == False:
             print("No history was saved on the result object of the algorithm")
             return
-            
-        history = self.res.history  # extract information from save history flag
+        elif self.has_history:
+            history = self.res.history  # extract information from save history flag
+        else:
+            return self.history_data
         
         n_evals = []             # corresponding number of function evaluations\
         hist_F = []              # the objective space values in each generation
@@ -478,12 +516,17 @@ class MultiOptimization():
                 }
     
     def constraint_satisfaction(self, type):
-        if self.has_history == False:
+        if self.has_history == False and self.imported_from_json == False:
             print("No history was saved on the result object of the algorithm")
             return
-        history = self.get_history()
+        if self.imported_from_json:
+            history = self.history_data
+        else:
+            history = self.get_history()
+        
         n_evals = history['n_evals']
 
+        
         plt.figure(figsize=(7, 5))
         
         if type == 'cv_avg': # Avg. CV of Pop
@@ -515,7 +558,100 @@ class MultiOptimization():
                 
         # Display the plot
         plt.show()
+
+    def line_plot(self, data, x_label, y_label, line_color):
+        y_axis = data
+        x_axis = list(range(1, len(y_axis)+1))
+        
+        # Plot
+        fig = plt.figure(figsize=(10, 5))
+        
+        for i in range(len(y_axis)):
+            plt.vlines(x=x_axis[i], ymin=0, ymax=y_axis[i], color=line_color) #, label='axvline - % of full height'
+        
+        plt.xlim(x_axis[0], x_axis[-1]+2)
+        plt.ylim(0, np.max(y_axis)+0.2)
+        
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        plt.show()
+
+    def get_topsis(self, weights, ideal_worst=None, ideal_best=None, top_individuals=5, reverse_individuals=False):
+        if self.has_result == False:
+            print("The optimization doesn't have results, topsis can not be calculated.")
+            return
+        a = self.res.F        
+        if ideal_worst != None:
+            if len(a[0]) != len(ideal_worst):
+                print("The lenght of ideal_worst must be: "+str(len(a[0]))+", "+str(len(ideal_worst))+" was given.")
+        if ideal_best != None:
+            if len(a[0]) != len(ideal_best):
+                print("The lenght of ideal_best must be: "+str(len(a[0]))+", "+str(len(ideal_best))+" was given.")
+        
+        sign = [-1, -1, -1]
+        result_topsis = []
+        result_individuals = []
+
+        column_name = []
+        index_name = []        
+        for i in range(len(weights)):
+            column_name.append('Weight '+str(i+1)) #+': '+' '.join([str(elem) for elem in weights[i]])
+        
+        for i in range(len(a)):
+            index_name.append('Pos '+str(i+1))
+        
+        results_d = pd.DataFrame(columns=column_name,
+                            index=index_name)
+
+        for w in range(len(weights)):
+            res_index, res_a = self.tp.topsis(a, weights[w], sign, custom_ideal_worst=ideal_worst, custom_ideal_best=ideal_best)
+            topsy_a = dict()
+            for i in range(len(res_a)):
+                topsy_a.update({'ind_'+str(i+1):res_a[i]})
+
+            result_topsis.append({'data':res_a, 'weight':', '.join([str(round(elem,2)) for elem in weights[w]])})
+            
+            temp = sorted(topsy_a.items(), key=lambda x:x[1], reverse=(not reverse_individuals))
+            converted_dict = dict(temp)
+            
+            j = 1
+            for cd in converted_dict:
+                results_d.at['Pos '+str(j), 'Weight '+str(w+1)] = cd + ': ' + str(round(converted_dict[cd], 6))
+                j = j + 1      
+            
+            individuals = []
+            for i in converted_dict.keys():
+                individuals.append(int(i.split('_')[1]))   
+            result_individuals.append(individuals[0:top_individuals])
+        self.result_topsis = result_topsis
+        self.individual_topsis = result_individuals
+        return result_topsis, results_d, result_individuals
     
+    def topsis_plot(self):
+        if len(self.result_topsis) == 0:
+            print("Please, first execute get_topsis function with the weights")
+            return
+        colors = {0:'gold',1:'darkorange',2:'blue',3:'limegreen',4:'red',5:'violet', 6:'green', 7:'brown'}
+        x_axis = list(range(1,len(self.result_topsis[0]['data'])+1))
+
+        fig, ax = plt.subplots(figsize=(10,6))
+        ax.set_xlabel('Individuals')
+        ax.set_ylabel('Closeness degree (%)')
+        #ax.set_title('')
+        ax.set_xticks(x_axis)
+        ax.set_ylim(0, 105)
+
+        data_percentage = list(map(lambda dd: dd['data']*100, self.result_topsis))
+        for d in range(len(data_percentage)):
+            ax2 = ax.twinx()
+            ax2.set_ylim(0, 105)
+            ax2.plot(x_axis, data_percentage[d], marker='o', color=colors[d], linewidth=2, label='Weight '+str(d+1)+': '+self.result_topsis[d]['weight'])
+            ax2.set_yticklabels([])
+
+        fig.legend(loc='upper right', bbox_to_anchor=(1.2, 1)) 
+
+        plt.show()  
+
     def running_metric(self, delta_gen, n_plots, gen=None):
         if self.has_history == False:
             print("No history was saved on the result object of the algorithm")
@@ -533,14 +669,71 @@ class MultiOptimization():
         else:
             history = self.res.history
 
+        self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]}
         for algorithm in history:
             running.update(algorithm)
+            self.running_history['delta_nadir'].append(running.running.delta_nadir)
+            self.running_history['delta_ideal'].append(running.running.delta_ideal)
 
         self.running_data = running.data
+        self.running_history['history'] = running.running.history
 
         self.igd = []
         for rd in running.data:
             self.igd.append({'tau':rd[0], 'igd':rd[2][-2]})
+    
+    def export_to_json(self, filename):
+        if self.imported_from_json and self.has_result:
+            print("No data to export")
+            return
+        try:
+            for i in range(len(self.running_data)):
+                for j in range(len(self.running_data[i][3])):
+                    if self.running_data[i][3][j]:
+                        self.running_data[i][3][j] = 1
+                    else:
+                        self.running_data[i][3][j] = 0
+
+            export_data = {'X':self.res.X, 'F':self.res.F, 'G':self.res.G, 'history_data':self.get_history(), 'running_data':self.running_data, 'running_history':self.running_history, 'igd':self.igd}
+            
+            json_str = json.dumps(export_data, indent=2, cls=NumpyArrayEncoder)
+            with open(filename + ".json", "w") as write_file:
+                write_file.write(json_str)
+            print("Data was exported successfully!!!")
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            print(message)
+            print("Data was not exported.!!!")
+
+    def import_from_json(self, filename):
+        try:
+            # JSON file
+            f = open (filename + '.json', "r")
+            
+            # Reading from file
+            data = json.loads(f.read())
+
+            self.res = Result()
+            self.res.X = data['X']
+            self.res.F = data['F']
+            self.res.G = data['G']
+            self.history_data = data['history_data']
+            self.running_data = data['running_data']
+            self.running_history = data['running_history']
+            self.igd = data['igd']            
+            
+            self.has_result = True
+            self.imported_from_json = True
+            
+            # Closing file
+            f.close()
+            print("Data was imported successfully!!!")
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            print(message)
+            print("Data was not imported.!!!")
    
 class FractionSumOneRepair(Repair):
 
@@ -572,3 +765,9 @@ class FractionSumOneRepair(Repair):
             print("******************FINAL Z:")
             print(Z)
         return Z
+
+class NumpyArrayEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return JSONEncoder.default(self, obj)
