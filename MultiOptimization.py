@@ -28,8 +28,7 @@ import oapackage
 from oapackage.oahelper import create_pareto_element
 from sklearn import preprocessing
 
-from pymoo.util.running_metric import RunningMetric
-from pymoo.util.running_metric import RunningMetricAnimation
+from .running_metric import RunningMetricAnimation
 
 import json
 from json import JSONEncoder
@@ -37,56 +36,65 @@ from json import JSONEncoder
 from .Topsis import Topsis
 
 class MultiOptimization():
-    """
-
-    :param functional_unit:
-    :type functional_unit: dict
-    :param method:
-    :type method: list
-    :param project:
-    :type project: ``swolfpy.Project.Project``
-    :type bw2_fu: bw2data.backends.peewee.proxies.Activity
-
-    """
     def __init__(self, functional_unit, method, project, bw2_fu):
+        """Constructor of the class
+
+        Args:
+            functional_unit (dict): e.g. {('waste', scenary_name): 1}
+            method (list): e.g. [('SwolfPy_Social','SwolfPy'),('SwolfPy_Total_Cost', 'SwolfPy')]
+            project (swolfpy.Project.Project): Project
+            bw2_fu (bw2data.backends.peewee.proxies.Activity): Brightway functional unit
+        """
         self.tp = Topsis()
-        self.optimization_list = []
-        self.configArray = []
-        self.objs = []
-        self.constr_eq = []
-        self.constr_ieq = []
-        self.cons = []
-        self.n_var = 0
+        self.optimization_list = []     # list of Optimization objects (Optimization.py)
+        self.configArray = []           # list to setup each Optimization object
+        self.objs = []                  # list of objective functions
+        self.constr_eq = []             # list of equality constrains
+        self.constr_ieq = []            # list of inequality constrains
+        self.cons = []                  # list of equality and inequality constrains
+        self.n_var = 0                  # number of project.parameters_list + n_scheme_vars of Optimization object
         for m in method:
             mth = []
             mth.append(m)
             tmpOpt = Optimization(functional_unit=functional_unit,method=mth,project=project)
             self.objs.append(tmpOpt._objective_function)
             self.optimization_list.append(tmpOpt)
-        #self.config(project)
-        self.res = [] #to save the result of the algorithm
+        self.res = []                   # to save the result of the algorithm
         self.bw2_fu = bw2_fu
-        self.has_result = False #boolean to know if the algorithm has a result (res.X exists)
-        self.results = [] # to save the DataFrame of the function report_res()
-        self.has_history = False
-        self.running_data = []
-        self.running_history = []
-        self.igd = []
-        self.imported_from_json = False
-        self.history_data = dict()
-        self.result_topsis = []
-        self.individual_topsis = []
+        self.has_result = False         # boolean to know if the algorithm has a result (res.X exists)
+        self.results = []               # to save the DataFrame of the function report_res()
+        self.has_history = False        # boolean to validate if the history of the algorithm was saved
+        self.running_data = []          # list to save the data of the RunningMetric class
+        self.running_history = []       # list to save the history of the RunningMetric class
+        self.igd = []                   # list to save igd from running_data variable
+        self.imported_from_json = False # boolean to validate if a json was imported from a previous run of the optimization
+        self.history_data = dict()      # self.get_history() of a previous run of the optimization when uploaded from a json
+        self.result_topsis = []         # save the output of function get_topsis
+        self.individual_topsis = []     # indexes of the individuals from results
     
     def config(self, project):
+        """Iterate each Optimization object and call config function of each one
+
+        Args:
+            project (swolfpy.Project.Project): Project
+        """
         for optElem in self.optimization_list:
             self.configArray = optElem.config(project)
     
     def set_config(self):
+        """Call set_config function of each Optimization list and count the total number of vars
+        """
         for optElem in self.optimization_list:
             optElem.set_config(self.configArray)            
         self.n_var = len(self.optimization_list[0].project.parameters_list) + self.optimization_list[0].n_scheme_vars
 
     def set_constraints(self, constraints=None, collection=False):
+        """Set inequality constrains to each Optimization object
+
+        Args:
+            constraints (dict, optional): Dictionary with inequality constraints e.g. {'limit':154529, 'KeyType':'Process','ConstType':"<="}. Defaults to None.
+            collection (bool, optional): To validate if collection exists. Defaults to False.
+        """
         for optElem in self.optimization_list:
             optElem.oldx = [0 for i in range(self.n_var)]
             optElem.magnitude = len(str(int(abs(optElem.score))))
@@ -99,6 +107,24 @@ class MultiOptimization():
                                  n_offsprings=None, eliminate_duplicates=True, 
                                  termination=40, seed=1, verbose=True, save_history=False,
                                  repair=False, verbose_repair=False):
+        """Performs multi-objective optimization using NSGA-II algorithm
+
+        Args:
+            constraints (dict, optional): Dictionary with inequality constraints e.g. {'limit':154529, 'KeyType':'Process','ConstType':"<="}. Defaults to None.
+            collection (bool, optional): To validate if collection exists. Defaults to False.
+            pop_size (int, optional): Population size. Defaults to 30.
+            n_offsprings (int, optional): Number of offsprings. Defaults to None.
+            eliminate_duplicates (bool, optional): Whether or not the algorithm eliminate duplicates in results. Defaults to True.
+            termination (int, optional): Number of generations when the algorithm will stop. Defaults to 40.
+            seed (int|bool, optional): To guarantee reproducibility of results. True generates random results everytime, while a int number will gives the same result everytime. Defaults to 1.
+            verbose (bool, optional): To print results in each generation. Defaults to True.
+            save_history (bool, optional): Save history of the algorithm to later generate running metric analysis. Defaults to False.
+            repair (bool, optional): Whether or not use a function to guarantee a faster feasibility of equality constraints. Defaults to False.
+            verbose_repair (bool, optional): To print the results of repair function in each generation. Defaults to False.
+
+        Returns:
+            pymoo.core.result.py: Object that contains algorithm results, None when there is not result
+        """        
         number_of_results = 0
         self.results = []
         self.has_result = False
@@ -119,12 +145,12 @@ class MultiOptimization():
                 self.constr_ieq.append(constraint['fun'])
         """
         Setup of the Functional Problem
-        n_var       ->
-        objs        ->
-        constr_ieq  ->
-        constr_eq   ->
-        xl          ->
-        xu          ->
+        n_var       -> number of variables
+        objs        -> objective functions
+        constr_ieq  -> inequality constraints
+        constr_eq   -> equality constraints
+        xl          -> lower limit of decision variables
+        xu          -> upper limit of decision variables
         """
         xl = [0 for _ in range(self.n_var)]
         xu = [1 for _ in range(self.n_var)]
@@ -149,8 +175,8 @@ class MultiOptimization():
         """  
         algorithm = NSGA2(pop_size=pop_size,
                     sampling=LHS(),
-                    crossover=SBX(prob=0.7), #eta=15, prob=0.9
-                    mutation=PolynomialMutation(prob=0.03), #prob=0.9, eta=20
+                    crossover=SBX(prob=0.9), #eta=15, prob=0.9
+                    mutation=PolynomialMutation(prob=0.06), #prob=0.9, eta=20
                     n_offsprings=n_offsprings,
                     eliminate_duplicates=eliminate_duplicates,
                     repair=repairObject)
@@ -186,6 +212,13 @@ class MultiOptimization():
         return res
     
     def report_res(self, Opt=False, fileName='', update=False):
+        """DataFrame with values for objective functions and decision variables for each generation from the pareto front
+
+        Args:
+            Opt (bool, optional): Whether or not an optimization object is given. Defaults to False.
+            fileName (str, optional): Name of the file in which the report will be saved in csv format. Defaults to ''.
+            update (bool, optional): To update the report when an optimization object is given. Defaults to False.
+        """
         if self.has_result == False:
             print("NO RESULTSET TO PROCESS A REPORT")
         else:
@@ -247,6 +280,16 @@ class MultiOptimization():
         return(results)
 
     def test_pareto(self, value=None, show=False):
+        """Test set of results from the algorithm to confirm that each value belongs to the Pareto front
+        Library oapackage is used
+
+        Args:
+            value (_type_, optional): Set of results to be tested. None uses the results from the algorithm. Defaults to None.
+            show (bool, optional): Print whether or not results belong to the pareto front. Defaults to False.
+
+        Returns:
+            oalib.ParetoMultiDoubleLong: Object ParetoMultiDoubleLong
+        """
         if value != None:
             datapoints = value
         else:
@@ -259,7 +302,9 @@ class MultiOptimization():
         pareto = oapackage.ParetoMultiDoubleLong()
 
         for ii in range(0, datapoints.shape[1]):
-            values = [[datapoints[0,ii]], [datapoints[1,ii]], [datapoints[2,ii]]]
+            values = []
+            for jj in range(0, datapoints.shape[0]):
+                values.append([datapoints[jj,ii]]) 
             val = create_pareto_element(values, pareto=pareto)
             pareto.addvalue(val, ii)
 
@@ -268,6 +313,13 @@ class MultiOptimization():
         return pareto
 
     def dynamic_scatter_plot_2D(self, x_name, y1_name, y2_name):
+        """Scatter plot for three objective functions in 2D
+
+        Args:
+            x_name (string): Objective function to plot in x axis
+            y1_name (string): Objective function to plot on left y axis
+            y2_name (string): Objective function to plot on right y axis
+        """
         results = self.report_res()
         data_to_plot = results.T.drop(index='unit')
         names = data_to_plot.columns
@@ -304,6 +356,13 @@ class MultiOptimization():
         plt.show()
 
     def dynamic_scatter_plot_3D(self, x_name, y_name, z_name):
+        """Scatter plot for three objective functions in 3D
+
+        Args:
+            x_name (string): Objective function to plot in x axis
+            y_name (string): Objective function to plot in y axis
+            z_name (string): Objective function to plot in z axis
+        """
         results = self.report_res()
         data_to_plot = results.T.drop(index='unit')
         names = data_to_plot.columns
@@ -317,24 +376,20 @@ class MultiOptimization():
         if len(error) > 0:
             print(error)
             return
-        d3 = data_to_plot[[x_name, y_name, z_name]]
-        d4 = preprocessing.normalize(d3)
+        base_data = data_to_plot[[x_name, y_name, z_name]]
+        normalized_base_data = preprocessing.normalize(base_data)
 
         # Plot
-        
         fig = plt.figure(figsize=(10, 7))
         ax = plt.axes(projection='3d')
 
         # Data for three-dimensional scattered points
-        zdata = d4.T[2]
-        xdata = d4.T[0]
-        ydata = d4.T[1]
+        zdata = normalized_base_data.T[2]
+        xdata = normalized_base_data.T[0]
+        ydata = normalized_base_data.T[1]
         
-        ax.scatter3D(xdata, ydata, zdata); #, c=zdata
+        ax.scatter3D(xdata, ydata, zdata);
     
-        #ax.set_box_aspect(aspect = (1,1,1))
-        #ax.text(.5, .5, .5, s='some string')
-        
         ax.set_xlabel(x_name, fontsize=10, labelpad=13)
         ax.set_ylabel(y_name, fontsize=10, labelpad=13)
         ax.set_zlabel(z_name, fontsize=10, labelpad=3, rotation= 'vertical')
@@ -342,6 +397,11 @@ class MultiOptimization():
         plt.show()
     
     def dynamic_multi_scatter_plot_2D(self, column_names):
+        """Scatter plot for two objective functions at a time in 2D
+
+        Args:
+            column_names (list): e.g. [('Total cost','Social cost'),('Total cost', 'GWP')]
+        """
         results = self.report_res()
         data_to_plot = results.T.drop(index='unit')
         names = data_to_plot.columns
@@ -376,6 +436,15 @@ class MultiOptimization():
         plt.show()
 
     def dynamic_bar_chart_tech_mix(self, current=None, column_names=None, individual=None, current_diversion=None, show_diversion=False):
+        """Bar Chart for individuals. Each bar containts the distribution of waste in percentage treated by each process model (e.g. LF)
+
+        Args:
+            current (list, optional): List of values that correspond to the current situation. This is represented in the first bar of the chart. Defaults to None. E.g. {'LF':220773, 'WTE':0, 'AD':0, 'Composting':9104}
+            column_names (list, optional): List of process models to be considered for the chart. Defaults to None. E.g. ['LF', 'WTE', 'AD', 'Composting', 'SS_MRF', 'Reprocessing']
+            individual (list, optional): List of individuals to be included in the chart. Defaults to None.
+            current_diversion (float, optional): Value that corresponds to the current diversion. Defaults to None.
+            show_diversion (bool, optional): Whether or not diversion data is included in the chart. Defaults to False.
+        """
         colors = {0:'gold',1:'darkorange',2:'blue',3:'limegreen',4:'red',5:'violet'}
         default_column_names = ['LF', 'WTE', 'AD', 'Composting', 'SS_MRF', 'Reprocessing']
         width = 0.35
@@ -479,6 +548,11 @@ class MultiOptimization():
         return res
     
     def get_history(self):
+        """Extract values from res.history of the algorithm
+
+        Returns:
+            dict: {n_evals, hist_F, hist_cv, hist_cv_avg}
+        """
         if self.has_history == False and self.imported_from_json == False:
             print("No history was saved on the result object of the algorithm")
             return
@@ -516,6 +590,11 @@ class MultiOptimization():
                 }
     
     def constraint_satisfaction(self, type):
+        """Test the constraint satisfaction of the results and provides plots that illustrate constraint violation
+
+        Args:
+            type (string): ['cv_avg', 'cv']
+        """
         if self.has_history == False and self.imported_from_json == False:
             print("No history was saved on the result object of the algorithm")
             return
@@ -577,6 +656,21 @@ class MultiOptimization():
         plt.show()
 
     def get_topsis(self, weights, ideal_worst=None, ideal_best=None, top_individuals=5, reverse_individuals=False):
+        """Implement TOPSIS technique to the results from the pareto front
+
+        Args:
+            weights (list): List of weights to be considerd by topsis
+            ideal_worst (list, optional): List of ideal worst solution for the objective functions (if known, otherwise topsis calculate these values). Defaults to None.
+            ideal_best (list, optional): List of ideal best solution for the objective functions (if known, otherwise topsis calculate these values). Defaults to None.
+            top_individuals (int, optional): Number of top individuals to return. Defaults to 5.
+            reverse_individuals (bool, optional): Whether or not is desire to plot the top or bottom individuals. Defaults to False.
+
+        Returns:
+            dict: Results from topsis {'data': , 'weight': }
+            DataFrame: Table with positions (ranks) vs weights showing the individuals and the corresponding topsis score
+            list: Ranking of individuals. One ranking per each weight.
+
+        """
         if self.has_result == False:
             print("The optimization doesn't have results, topsis can not be calculated.")
             return
@@ -595,7 +689,7 @@ class MultiOptimization():
         column_name = []
         index_name = []        
         for i in range(len(weights)):
-            column_name.append('Weight '+str(i+1)) #+': '+' '.join([str(elem) for elem in weights[i]])
+            column_name.append('Weight '+str(i+1))
         
         for i in range(len(a)):
             index_name.append('Pos '+str(i+1))
@@ -628,6 +722,8 @@ class MultiOptimization():
         return result_topsis, results_d, result_individuals
     
     def topsis_plot(self):
+        """Plot topsis results obtained by get_topsis method
+        """
         if len(self.result_topsis) == 0:
             print("Please, first execute get_topsis function with the weights")
             return
@@ -653,6 +749,13 @@ class MultiOptimization():
         plt.show()  
 
     def running_metric(self, delta_gen, n_plots, gen=None):
+        """Plots for running metric
+
+        Args:
+            delta_gen (int): distance between generations to be plotted 
+            n_plots (int): number of plots 
+            gen (int, optional): max generation to be plotted. Defaults to None.
+        """
         if self.has_history == False:
             print("No history was saved on the result object of the algorithm")
             return
@@ -682,6 +785,28 @@ class MultiOptimization():
         for rd in running.data:
             self.igd.append({'tau':rd[0], 'igd':rd[2][-2]})
     
+    def last_chart_running_metric(self):
+        """Plot the last chart for the running metric
+        """
+        if len(self.running_data) == 0:
+            print("No running_metric data found.")
+            return
+
+        running = RunningMetricAnimation(delta_gen=1,
+                        n_plots=len(self.igd),
+                        key_press=False,
+                        do_show=True)
+
+        for i in range(len(self.running_data)):
+            tau = self.running_data[i][0]
+            f = self.running_data[i][2]
+            x = self.running_data[i][1]
+            v = self.running_data[i][3]
+            running.data.append((tau, x, f, v))
+        fig, ax = plt.subplots()
+        running.draw(running.data, ax)
+        ax.legend(bbox_to_anchor=(1.07+(0.2*running.col_size), 1), ncol=running.col_size)
+
     def export_to_json(self, filename):
         if self.imported_from_json and self.has_result:
             print("No data to export")
@@ -736,7 +861,11 @@ class MultiOptimization():
             print("Data was not imported.!!!")
    
 class FractionSumOneRepair(Repair):
+    """Guarantees a faster feasibility of the equality constraints
 
+    Args:
+        Repair (pymoo.core.repair): Repair class of Pymoo Library
+    """
     def __init__(self, equality_var_array, verbose = False):
         self.equality_var_array = equality_var_array
         self.verbose = verbose
@@ -767,6 +896,11 @@ class FractionSumOneRepair(Repair):
         return Z
 
 class NumpyArrayEncoder(JSONEncoder):
+    """Helper class to transform list into json compatible list
+
+    Args:
+        JSONEncoder (json): JSONEncoder object
+    """
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
