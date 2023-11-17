@@ -41,7 +41,7 @@ class MultiOptimization():
 
         Args:
             functional_unit (dict): e.g. {('waste', scenary_name): 1}
-            method (list): e.g. [('SwolfPy_Social','SwolfPy'),('SwolfPy_Total_Cost', 'SwolfPy')]
+            method (list): e.g. [{'name': 'Social Cost', 'method': ('SwolfPy_Social','SwolfPy'), 'unit': '$/Mg'}, {}...]
             project (swolfpy.Project.Project): Project
             bw2_fu (bw2data.backends.peewee.proxies.Activity): Brightway functional unit
         """
@@ -55,10 +55,11 @@ class MultiOptimization():
         self.n_var = 0                  # number of project.parameters_list + n_scheme_vars of Optimization object
         for m in method:
             mth = []
-            mth.append(m)
+            mth.append(m['method'])
             tmpOpt = Optimization(functional_unit=functional_unit,method=mth,project=project)
             self.objs.append(tmpOpt._objective_function)
             self.optimization_list.append(tmpOpt)
+        self.method_list = method       # list of methods
         self.res = []                   # to save the result of the algorithm
         self.bw2_fu = bw2_fu
         self.has_result = False         # boolean to know if the algorithm has a result (res.X exists)
@@ -175,8 +176,8 @@ class MultiOptimization():
         """  
         algorithm = NSGA2(pop_size=pop_size,
                     sampling=LHS(),
-                    crossover=SBX(prob=0.9), #eta=15, prob=0.9
-                    mutation=PolynomialMutation(prob=0.06), #prob=0.9, eta=20
+                    crossover=SBX(prob=0.8), #eta=15, prob=0.9
+                    mutation=PolynomialMutation(prob=0.08), #prob=0.9, eta=20
                     n_offsprings=n_offsprings,
                     eliminate_duplicates=eliminate_duplicates,
                     repair=repairObject)
@@ -213,7 +214,7 @@ class MultiOptimization():
     
     def report_res(self, Opt=False, fileName='', update=False):
         """DataFrame with values for objective functions and decision variables for each generation from the pareto front
-
+        
         Args:
             Opt (bool, optional): Whether or not an optimization object is given. Defaults to False.
             fileName (str, optional): Name of the file in which the report will be saved in csv format. Defaults to ''.
@@ -222,59 +223,62 @@ class MultiOptimization():
         if self.has_result == False:
             print("NO RESULTSET TO PROCESS A REPORT")
         else:
+            default_cost_values = [('SwolfPy_Operational_Cost', 'SwolfPy'), ('SwolfPy_Capital_Cost', 'SwolfPy'), ('SwolfPy_Total_Cost', 'SwolfPy'), ('SwolfPy_Social', 'SwolfPy')]
+            used_cost = []
+            dict_method = []
             if Opt == False:
                 Opt = self.optimization_list[0]
             
             if len(self.results) == 0 or update:
                 results = pd.DataFrame()
+                processes = ['Collection','LF','WTE','AD','Composting','SS_MRF','Reprocessing']
                 for individual in range(len(self.res.X)):
                     Opt._objective_function(self.res.X[individual])            
                     individual_name = "ind_"+str(individual+1)
                     if 'unit' in results.columns:
                         results.insert(len(results.columns),individual_name,np.nan)
                     else:
+                        index = ['Diversion']
+                        for m in self.method_list:
+                            dict_method.append({'name':m['name'], 'method':m['method'], 'unit':m['unit']})
+                            used_cost.append(m['method'])
+                            index.append(m['name'])
+                        
+                        for dc in default_cost_values:
+                            if dc not in used_cost:
+                                used_cost.append(dc)
+                                name = dc[0].replace('SwolfPy_','').replace('_',' ')
+                                if name == 'Social':
+                                    name += ' Cost'
+                                dict_method.append({'name':name, 'method':dc, 'unit': '$/Mg'})
+                                index.append(name)
+                                
+                        index = index + processes + ['IND']
                         results = pd.DataFrame(columns=['unit'],
-                                        index=['Diversion','GWP','Operation Cost','Capital cost','Total cost','Social cost',
-                                                'Collection','LF','WTE','AD','Composting','SS_MRF','Reprocessing','IND'])
-                        results.at['GWP', 'unit'] = 'kg CO2/Mg'
-                        results.at['Operation Cost', 'unit'] = '$/Mg'
-                        results.at['Capital cost', 'unit'] = '$/Mg'
-                        results.at['Total cost', 'unit'] = '$/Mg'
-                        results.at['Social cost', 'unit'] = '$/Mg'
+                                        index=index)
+                        
+                        for dm in dict_method:
+                            results.at[dm['name'], 'unit'] = dm['unit']
+                            
                         results.at['Diversion', 'unit'] = '%'
-                        for process in ['Collection','LF','WTE','AD','Composting','SS_MRF','Reprocessing']:
+                        for process in processes:
                             results.at[process, 'unit'] = 'Mg/yr'
                     
                     results.at['IND', individual_name] = str(individual+1)
                     
-                    Opt.switch_method(('CML 2001 (obsolete)', 'climate change', 'GWP 100a'))
-                    Opt.lcia()
-                    results.at['GWP', individual_name] = round(Opt.score/float(self.bw2_fu.as_dict()['unit'].split(' ')[0]),2)
-
-                    Opt.switch_method(('SwolfPy_Operational_Cost', 'SwolfPy'))
-                    Opt.lcia()
-                    results.at['Operation Cost', individual_name] = round(Opt.score/float(self.bw2_fu.as_dict()['unit'].split(' ')[0]),2)
-
-                    Opt.switch_method(('SwolfPy_Capital_Cost', 'SwolfPy'))
-                    Opt.lcia()
-                    results.at['Capital cost', individual_name] = round(Opt.score/float(self.bw2_fu.as_dict()['unit'].split(' ')[0]),2)
-
-                    Opt.switch_method(('SwolfPy_Total_Cost', 'SwolfPy'))
-                    Opt.lcia()
-                    results.at['Total cost', individual_name] = round(Opt.score/float(self.bw2_fu.as_dict()['unit'].split(' ')[0]),2)
-                    
-                    Opt.switch_method(('SwolfPy_Social','SwolfPy'))
-                    Opt.lcia()
-                    results.at['Social cost', individual_name] = round(Opt.score/float(self.bw2_fu.as_dict()['unit'].split(' ')[0]),2)
-
-                    for process in ['Collection','LF','WTE','AD','Composting','SS_MRF','Reprocessing']:
+                    for dm in dict_method:
+                        Opt.switch_method(dm['method'])
+                        Opt.lcia()
+                        results.at[dm['name'], individual_name] = round(Opt.score/float(self.bw2_fu.as_dict()['unit'].split(' ')[0]),2)
+        
+                    for process in processes:
                         results.at[process, individual_name] = round(LCA_matrix.get_mass_flow(Opt, process))
-
+        
                     results.at['Diversion', individual_name] = round((1-results[individual_name]['LF']/results[individual_name]['Collection'])*100,2)
                 self.results = results
             else:
                 results = self.results
-
+        
             if len(fileName) > 0:
                 results.to_csv(fileName+'.csv')
         return(results)
@@ -819,7 +823,7 @@ class MultiOptimization():
                     else:
                         self.running_data[i][3][j] = 0
 
-            export_data = {'X':self.res.X, 'F':self.res.F, 'G':self.res.G, 'history_data':self.get_history(), 'running_data':self.running_data, 'running_history':self.running_history, 'igd':self.igd}
+            export_data = {'method_list':self.method_list, 'X':self.res.X, 'F':self.res.F, 'G':self.res.G, 'history_data':self.get_history(), 'running_data':self.running_data, 'running_history':self.running_history, 'igd':self.igd}
             
             json_str = json.dumps(export_data, indent=2, cls=NumpyArrayEncoder)
             with open(filename + ".json", "w") as write_file:
@@ -846,7 +850,9 @@ class MultiOptimization():
             self.history_data = data['history_data']
             self.running_data = data['running_data']
             self.running_history = data['running_history']
-            self.igd = data['igd']            
+            self.igd = data['igd']   
+
+            self.method_list = data['method_list']         
             
             self.has_result = True
             self.imported_from_json = True
