@@ -176,8 +176,8 @@ class MultiOptimization():
         """  
         algorithm = NSGA2(pop_size=pop_size,
                     sampling=LHS(),
-                    crossover=SBX(prob=0.8), #eta=15, prob=0.9
-                    mutation=PolynomialMutation(prob=0.08), #prob=0.9, eta=20
+                    crossover=SBX(prob=0.9), #eta=15, prob=0.9
+                    mutation=PolynomialMutation(prob=0.03), #prob=0.9, eta=20
                     n_offsprings=n_offsprings,
                     eliminate_duplicates=eliminate_duplicates,
                     repair=repairObject)
@@ -828,12 +828,12 @@ class MultiOptimization():
             json_str = json.dumps(export_data, indent=2, cls=NumpyArrayEncoder)
             with open(filename + ".json", "w") as write_file:
                 write_file.write(json_str)
-            print("Data was exported successfully!!!")
+            print("Data was exported successfully to the json file called: " + filename + ".json!!!")
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
             print(message)
-            print("Data was not exported.!!!")
+            print("Data was not exported to json.!!!")
 
     def import_from_json(self, filename):
         try:
@@ -852,19 +852,37 @@ class MultiOptimization():
             self.running_history = data['running_history']
             self.igd = data['igd']   
 
-            self.method_list = data['method_list']         
+            for i in range(len(data['method_list'])):
+                data['method_list'][i]['method'] = tuple(row for row in data['method_list'][i]['method'])
+
+            self.method_list = data['method_list']
             
             self.has_result = True
             self.imported_from_json = True
             
             # Closing file
             f.close()
-            print("Data was imported successfully!!!")
+            print("Data was imported successfully from the json file called: " + filename + ".json!!!")
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
             print(message)
-            print("Data was not imported.!!!")
+            print("Data was not imported from json.!!!")
+    
+    def import_from_csv(self, filename):
+        try:
+            df = pd.read_csv(filename + '.csv', index_col=[0])
+            temp = df.T
+            temp['IND'] = temp['IND'].fillna(0)
+            temp = temp.astype({'IND': 'string'})
+            temp['IND'] = temp['IND'].apply(lambda r:r.split('.')[0])
+            self.results = temp.T
+            print("Data was imported successfully from the csv file called: " + filename + ".csv!!!")
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            print(message)
+            print("Data was not imported from csv.!!!")
    
 class FractionSumOneRepair(Repair):
     """Guarantees a faster feasibility of the equality constraints
