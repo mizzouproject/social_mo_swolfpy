@@ -19,6 +19,7 @@ import os
 import pyDOE
 from time import time
 from brightway2 import projects
+from collections import defaultdict
 
 
 class Optimization(LCA_matrix):
@@ -291,9 +292,15 @@ class Optimization(LCA_matrix):
 
         if self.constraints:
             for key in self.constraints.keys():
-                cons.append({'type': 'ineq',
-                             'fun': self._create_inequality(key, self.constraints[key]['limit'], self.constraints[key]['KeyType'],
-                                                            self.constraints[key]['ConstType'], inverse=inverse)})
+                temp_constraint = defaultdict(list)
+                if type(self.constraints) != type(temp_constraint):
+                    temp_constraint[key].append(self.constraints[key])
+                else:
+                    temp_constraint = self.constraints
+                for data in temp_constraint[key]:
+                    cons.append({'type': 'ineq',
+                                 'fun': self._create_inequality(key, data['limit'], data['KeyType'],
+                                                            data['ConstType'], inverse=inverse)})
         return cons
 
     @staticmethod
