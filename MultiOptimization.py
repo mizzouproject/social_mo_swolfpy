@@ -247,9 +247,13 @@ class MultiOptimization():
                         for dc in default_cost_values:
                             if dc not in used_cost:
                                 used_cost.append(dc)
-                                name = dc[0].replace('SwolfPy_','').replace('_',' ')
+                                name = dc[0].replace('SwolfPy_','').replace('_',' ') # Social 2
                                 if name == 'Social':
-                                    name += ' Cost'
+                                    # name += ' Cost'
+                                    name += ' Management Cost'
+                                elif name == 'Social 2':
+                                    # name += ' Cost'
+                                    name = 'Social Community Cost'
                                 dict_method.append({'name':name, 'method':dc, 'unit': '$/Mg'})
                                 index.append(name)
                                 

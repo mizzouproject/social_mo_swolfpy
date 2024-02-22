@@ -67,12 +67,14 @@ class Technosphere:
         
         #social indicator test
         if len(db.search('social test')) == 0:
-            db.new_activity(code='Social_test1', name="Social test 1", unit='USD', categories=('social',),
-                            type='economic', location='US').save() 
-            db.new_activity(code='Social_test2', name="Social test 2", unit='USD', categories=('social',),
-                            type='economic', location='US').save()
-            db.new_activity(code='Social_test3', name="Social test 3", unit='USD', categories=('social',),
-                            type='economic', location='US').save()
+            for i in range(1, 4): # i from 1 to 3
+                db.new_activity(code='Social_test'+str(i), name="Social test "+str(i), unit='USD', categories=('social',),
+                                type='economic', location='US').save()
+
+        if len(db.search('social Community')) == 0:
+            for i in range(1, 4): # i from 1 to 3
+                db.new_activity(code='Social_Community'+str(i), name="Social Community "+str(i), unit='USD', categories=('social',),
+                                type='economic', location='US').save()
                             
         # adding swolf methods
         import_methods()
