@@ -815,6 +815,25 @@ class MultiOptimization():
         running.draw(running.data, ax)
         ax.legend(bbox_to_anchor=(1.07+(0.2*running.col_size), 1), ncol=running.col_size)
 
+    def plot_sankey(self, fileName, individual):
+        if self.has_result == False:
+            print("NO RESULTSET TO CREATE A PLOT")
+            return 
+        result = self.res.X
+        total_individual = len(result)
+        if individual > total_individual or individual < 1:
+            print("Number of individual is not correct: expected a value between 1 and "+str(total_individual)+" -> "+str(individual))
+            return
+        optElem = self.optimization_list[0]
+        optElem.optimized_x = list()
+        for i in range(len(optElem.project.parameters_list)):
+            optElem.optimized_x.append({'name': optElem.project.parameters_list[i]['name'],
+                        'amount':result[individual-1][i]})   
+        for k, v in optElem.scheme_vars_dict.items():
+            optElem.optimized_x.append({'name': v,
+                        'amount': result[individual-1][k]})
+        optElem.plot_sankey(fileName=fileName)
+
     def export_to_json(self, filename):
         if self.imported_from_json and self.has_result:
             print("No data to export")
