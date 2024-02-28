@@ -67,12 +67,12 @@ class Technosphere:
         
         #social indicator test
         if len(db.search('social test')) == 0:
-            for i in range(1, 4): # i from 1 to 3
+            for i in range(1, 3): # i from 1 to 3
                 db.new_activity(code='Social_test'+str(i), name="Social test "+str(i), unit='USD', categories=('social',),
                                 type='economic', location='US').save()
 
         if len(db.search('social Community')) == 0:
-            for i in range(1, 4): # i from 1 to 3
+            for i in range(1, 3): # i from 1 to 3
                 db.new_activity(code='Social_Community'+str(i), name="Social Community "+str(i), unit='USD', categories=('social',),
                                 type='economic', location='US').save()
                             
