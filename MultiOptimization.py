@@ -9,6 +9,7 @@ from .LCA_matrix import LCA_matrix
 import numpy as np
 import pandas as pd
 import json
+import math
 #pymoo imports
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize as MultiObjMinimize
@@ -19,6 +20,10 @@ from pymoo.operators.crossover.sbx import SBX
 from pymoo.visualization.scatter import Scatter
 from pymoo.core.repair import Repair
 from pymoo.core.result import Result
+from pymoo.core.callback import Callback
+from pymoo.termination.ftol import calc_delta_norm
+from pymoo.util.normalization import normalize
+from pymoo.indicators.igd import IGD
 
 import shutup; shutup.please()
 from datetime import datetime
@@ -193,7 +198,7 @@ class MultiOptimization():
                                 termination=('n_gen', termination),
                                 seed=seed,
                                 verbose=verbose,
-                                save_history=save_history)
+                                callback=HistoryCallback() if save_history else DummyCallback())
         end_time = datetime.now() # current date and time
         end_date_time = end_time.strftime("%H:%M:%S")
         print("Optimization finished at: "+end_date_time)
@@ -203,6 +208,10 @@ class MultiOptimization():
             number_of_results = len(res.X)
             self.has_result = True
             self.has_history = save_history
+            if save_history:
+                self.running_data = res.algorithm.callback.running_data
+                self.running_history = res.algorithm.callback.running_history
+                self.history_data = res.algorithm.callback.history_data
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
@@ -564,38 +573,7 @@ class MultiOptimization():
         if self.has_history == False and self.imported_from_json == False:
             print("No history was saved on the result object of the algorithm")
             return
-        elif self.has_history:
-            history = self.res.history  # extract information from save history flag
-        else:
-            return self.history_data
-        
-        n_evals = []             # corresponding number of function evaluations\
-        hist_F = []              # the objective space values in each generation
-        hist_cv = []             # constraint violation in each generation
-        hist_cv_avg = []         # average constraint violation in the whole population
-        
-        for algo in history:
-        
-            # store the number of function evaluations
-            n_evals.append(algo.evaluator.n_eval)
-        
-            # retrieve the optimum from the algorithm
-            optmulti= algo.opt
-        
-            # store the least contraint violation and the average in each population
-            hist_cv.append(optmulti.get("CV").min())
-            hist_cv_avg.append(algo.pop.get("CV").mean())
-        
-            # filter out only the feasible and append and objective space values
-            feas = np.where(optmulti.get("feasible"))[0]
-            hist_F.append(optmulti.get("F")[feas])
-
-        return {
-                    'n_evals': n_evals,             
-                    'hist_F': hist_F,              
-                    'hist_cv': hist_cv,
-                    'hist_cv_avg': hist_cv_avg
-                }
+        return self.history_data
     
     def constraint_satisfaction(self, type):
         """Test the constraint satisfaction of the results and provides plots that illustrate constraint violation
@@ -758,7 +736,6 @@ class MultiOptimization():
 
     def running_metric(self, delta_gen, n_plots, gen=None):
         """Plots for running metric
-
         Args:
             delta_gen (int): distance between generations to be plotted 
             n_plots (int): number of plots 
@@ -767,54 +744,52 @@ class MultiOptimization():
         if self.has_history == False:
             print("No history was saved on the result object of the algorithm")
             return
-        running = RunningMetricAnimation(delta_gen=delta_gen,
-                        n_plots=n_plots,
-                        key_press=False,
-                        do_show=True)
+
+        if n_plots * delta_gen > len(self.running_data):
+            n_plots = round(len(self.running_data)/delta_gen)
+
+        figure, ax1 = plt.subplots(n_plots, figsize=(6,n_plots*4))
+        data = []
+        generation = delta_gen-1
         if gen != None:
-            if gen > len(self.res.history) or gen < 1:
-                print("Generation "+str(gen)+" is out of range, value allowed between 1 and "+str(len(self.res.history)))
+            if gen > len(self.res.algorithm.callback.running_history["history"]) or gen < 1:
+                print("Generation "+str(gen)+" is out of range, value allowed between 1 and "+str(len(self.running_history["history"])))
                 return
             else:
-                history = self.res.history[:gen]
-        else:
-            history = self.res.history
+                generation = gen-1
+                n_plots = 1
+         
+        j = 0
+        col_size = int(math.ceil(n_plots / 15))
+        for i in range(0, n_plots):
+            if generation < len(self.running_data):
+                if n_plots == 1:
+                    ax = ax1
+                else:
+                    ax = ax1[j]
+                data.append(self.running_data[generation])
 
-        self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]}
-        for algorithm in history:
-            running.update(algorithm)
-            self.running_history['delta_nadir'].append(running.running.delta_nadir)
-            self.running_history['delta_ideal'].append(running.running.delta_ideal)
+                for tau, x, f, v in data[:-1]:
+                    ax.plot(x, f, label="t=%s" % tau, alpha=0.6, linewidth=3)
 
-        self.running_data = running.data
-        self.running_history['history'] = running.running.history
-
+                tau, x, f, v = data[-1]
+                ax.plot(x, f, label="t=%s (*)" % tau, alpha=0.9, linewidth=3)
+        
+                for k in range(len(v)):
+                    if v[k]:
+                        ax.plot([k + 1, k + 1], [0, f[k]], color="black", linewidth=0.5, alpha=0.5)
+                        ax.plot([k + 1], [f[k]], "o", color="black", alpha=0.5, markersize=2)
+                ax.set_yscale("symlog")
+                ax.legend(bbox_to_anchor=(1.07+(0.2*col_size), 1), ncol=col_size)
+        
+                ax.set_xlabel("Generation")
+                ax.set_ylabel("$\Delta \, f$", rotation=0)
+                j+=1
+                generation += delta_gen
         self.igd = []
-        for rd in running.data:
+        for rd in data:
             self.igd.append({'tau':rd[0], 'igd':rd[2][-2]})
     
-    def last_chart_running_metric(self):
-        """Plot the last chart for the running metric
-        """
-        if len(self.running_data) == 0:
-            print("No running_metric data found.")
-            return
-
-        running = RunningMetricAnimation(delta_gen=1,
-                        n_plots=len(self.igd),
-                        key_press=False,
-                        do_show=True)
-
-        for i in range(len(self.running_data)):
-            tau = self.running_data[i][0]
-            f = self.running_data[i][2]
-            x = self.running_data[i][1]
-            v = self.running_data[i][3]
-            running.data.append((tau, x, f, v))
-        fig, ax = plt.subplots()
-        running.draw(running.data, ax)
-        ax.legend(bbox_to_anchor=(1.07+(0.2*running.col_size), 1), ncol=running.col_size)
-
     def plot_sankey(self, fileName, individual):
         if self.has_result == False:
             print("NO RESULTSET TO CREATE A PLOT")
@@ -906,7 +881,64 @@ class MultiOptimization():
             message = template.format(type(ex).__name__, ex.args)
             print(message)
             print("Data was not imported from csv.!!!")
-   
+
+class HistoryCallback(Callback):
+    def __init__(self) -> None:
+        super().__init__()
+        self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]}
+        self.running_data = []
+        self.history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []}
+
+    def notify(self, algorithm):
+        F = algorithm.pop.get("F")
+        c_F, c_ideal, c_nadir = F, F.min(axis=0), F.max(axis=0)
+
+        # the current norm that should be used for normalization
+        norm = c_nadir - c_ideal
+        norm[norm < 1e-32] = 1.0
+
+        # normalize the current objective space values
+        c_N = normalize(c_F, c_ideal, c_nadir)
+
+        # normalize all previous generations with respect to current ideal and nadir
+        N = [normalize(e["F"], c_ideal, c_nadir) for e in self.running_history['history']]
+        
+        # append the current optimum to the history
+        self.running_history['history'].append(dict(F=F, ideal=c_ideal, nadir=c_nadir))
+
+        self.running_history['delta_ideal'] = [calc_delta_norm(self.running_history['history'][k]["ideal"], self.running_history['history'][k-1]["ideal"], norm) for k in range(1, len(self.running_history['history']))] + [0.0]
+        self.running_history['delta_nadir'] = [calc_delta_norm(self.running_history['history'][k]["nadir"], self.running_history['history'][k-1]["nadir"], norm) for k in range(1, len(self.running_history['history']))] + [0.0]
+
+        delta_f = [IGD(c_N).do(N[k]) for k in range(len(N))]
+
+        tau = algorithm.n_gen
+        f = delta_f
+        x = np.arange(len(f)) + 1
+        v = [max(ideal, nadir) > 0.005 for ideal, nadir in zip(self.running_history['delta_ideal'], self.running_history['delta_nadir'])]
+       
+        self.running_data.append((tau, x, f, v))
+
+        # store the number of function evaluations
+        self.history_data["n_evals"].append(algorithm.evaluator.n_eval)
+    
+        # retrieve the optimum from the algorithm
+        optmulti= algorithm.opt
+    
+        # store the least contraint violation and the average in each population
+        self.history_data["hist_cv"].append(optmulti.get("CV").min())
+        self.history_data["hist_cv_avg"].append(algorithm.pop.get("CV").mean())
+    
+        # filter out only the feasible and append and objective space values
+        feas = np.where(optmulti.get("feasible"))[0]
+        self.history_data["hist_F"].append(optmulti.get("F")[feas])
+
+class DummyCallback(Callback):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def notify(self, algorithm):
+        return
+
 class FractionSumOneRepair(Repair):
     """Guarantees a faster feasibility of the equality constraints
 
