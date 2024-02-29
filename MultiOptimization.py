@@ -33,8 +33,6 @@ import oapackage
 from oapackage.oahelper import create_pareto_element
 from sklearn import preprocessing
 
-from .running_metric import RunningMetricAnimation
-
 import json
 from json import JSONEncoder
 
@@ -198,7 +196,8 @@ class MultiOptimization():
                                 termination=('n_gen', termination),
                                 seed=seed,
                                 verbose=verbose,
-                                callback=HistoryCallback() if save_history else DummyCallback())
+                                callback=HistoryCallback() if save_history else DummyCallback(),
+                                return_least_infeasible=True)
         end_time = datetime.now() # current date and time
         end_date_time = end_time.strftime("%H:%M:%S")
         print("Optimization finished at: "+end_date_time)
@@ -759,14 +758,13 @@ class MultiOptimization():
                 generation = gen-1
                 n_plots = 1
          
-        j = 0
         col_size = int(math.ceil(n_plots / 15))
         for i in range(0, n_plots):
             if generation < len(self.running_data):
                 if n_plots == 1:
                     ax = ax1
                 else:
-                    ax = ax1[j]
+                    ax = ax1[i]
                 data.append(self.running_data[generation])
 
                 for tau, x, f, v in data[:-1]:
@@ -784,7 +782,6 @@ class MultiOptimization():
         
                 ax.set_xlabel("Generation")
                 ax.set_ylabel("$\Delta \, f$", rotation=0)
-                j+=1
                 generation += delta_gen
         self.igd = []
         for rd in data:
