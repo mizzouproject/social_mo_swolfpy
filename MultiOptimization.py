@@ -6,6 +6,7 @@ Created on Thu Jul 20 11:22:00 2023
 """
 from .Optimization import Optimization
 from .LCA_matrix import LCA_matrix
+from .Database import DatabaseMultiOpt
 import numpy as np
 import pandas as pd
 import json
@@ -69,10 +70,10 @@ class MultiOptimization():
         self.results = []               # to save the DataFrame of the function report_res()
         self.has_history = False        # boolean to validate if the history of the algorithm was saved
         self.running_data = []          # list to save the data of the RunningMetric class
-        self.running_history = []       # list to save the history of the RunningMetric class
+        self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]}       # list to save the history of the RunningMetric class
         self.igd = []                   # list to save igd from running_data variable
         self.imported_from_json = False # boolean to validate if a json was imported from a previous run of the optimization
-        self.history_data = dict()      # self.get_history() of a previous run of the optimization when uploaded from a json
+        self.history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []}      # self.get_history() of a previous run of the optimization when uploaded from a json
         self.result_topsis = []         # save the output of function get_topsis
         self.individual_topsis = []     # indexes of the individuals from results
     
@@ -135,7 +136,8 @@ class MultiOptimization():
         self.has_history = False
         self.imported_from_json = False
         self.running_data = []
-        self.running_history = []
+        self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]}
+        self.history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []}
         """
         Initialization of each Optimization object inside the optimization_list
         """   
@@ -208,9 +210,8 @@ class MultiOptimization():
             self.has_result = True
             self.has_history = save_history
             if save_history:
-                self.running_data = res.algorithm.callback.running_data
-                self.running_history = res.algorithm.callback.running_history
-                self.history_data = res.algorithm.callback.history_data
+                res.algorithm.callback.database._close_connection()
+                self.upload_from_sqlite()                
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
@@ -774,7 +775,7 @@ class MultiOptimization():
                 ax.plot(x, f, label="t=%s (*)" % tau, alpha=0.9, linewidth=3)
         
                 for k in range(len(v)):
-                    if v[k]:
+                    if v[k] == 1:
                         ax.plot([k + 1, k + 1], [0, f[k]], color="black", linewidth=0.5, alpha=0.5)
                         ax.plot([k + 1], [f[k]], "o", color="black", alpha=0.5, markersize=2)
                 ax.set_yscale("symlog")
@@ -811,13 +812,6 @@ class MultiOptimization():
             print("No data to export")
             return
         try:
-            for i in range(len(self.running_data)):
-                for j in range(len(self.running_data[i][3])):
-                    if self.running_data[i][3][j]:
-                        self.running_data[i][3][j] = 1
-                    else:
-                        self.running_data[i][3][j] = 0
-
             export_data = {'method_list':self.method_list, 'X':self.res.X, 'F':self.res.F, 'G':self.res.G, 'history_data':self.get_history(), 'running_data':self.running_data, 'running_history':self.running_history, 'igd':self.igd}
             
             json_str = json.dumps(export_data, indent=2, cls=NumpyArrayEncoder)
@@ -878,56 +872,83 @@ class MultiOptimization():
             message = template.format(type(ex).__name__, ex.args)
             print(message)
             print("Data was not imported from csv.!!!")
+    
+    def upload_from_sqlite(self):
+        self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]} 
+        self.running_data = []
+        self.history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []} 
+        database = DatabaseMultiOpt()
+        data = database.get_iterations()
+        start_time = datetime.now() # current date and time
+        start_date_time = start_time.strftime("%H:%M:%S")
+        print("\n---------------------------------")
+        print("Importing from sqlite started at: "+start_date_time)
+        for d in data:
+            running_history = json.loads(d[2])
+            c_F, c_ideal, c_nadir = np.array(running_history['F']), np.array(running_history['ideal']), np.array(running_history['nadir'])
+            self.running_history['history'].append({"F":c_F, "ideal":c_ideal, "nadir":c_nadir})
+            
+            # the current norm that should be used for normalization
+            norm =c_nadir - c_ideal
+            norm[norm < 1e-32] = 1.0
+            
+            # normalize the current objective space values
+            c_N = normalize(c_F, c_ideal, c_nadir)
+
+            # normalize all previous generations with respect to current ideal and nadir
+            N = [normalize(e["F"], c_ideal, c_nadir) for e in self.running_history['history']]
+
+            self.running_history['delta_ideal'] = [calc_delta_norm(self.running_history['history'][k]["ideal"], self.running_history['history'][k-1]["ideal"], norm) for k in range(1, len(self.running_history['history']))] + [0.0]
+            self.running_history['delta_nadir'] = [calc_delta_norm(self.running_history['history'][k]["nadir"], self.running_history['history'][k-1]["nadir"], norm) for k in range(1, len(self.running_history['history']))] + [0.0]
+
+            delta_f = [IGD(c_N).do(N[k]) for k in range(len(N))]
+
+            history_data = json.loads(d[3])
+            self.history_data['n_evals'].append(np.array(history_data['n_evals']))
+            self.history_data['hist_F'].append(np.array(history_data['hist_F']))
+            self.history_data['hist_cv'].append(np.array(history_data['hist_cv']))
+            self.history_data['hist_cv_avg'].append(np.array(history_data['hist_cv_avg']))
+
+            tau = d[1]
+            f = delta_f
+            x = np.arange(len(f)) + 1
+            v = [(1 if max(ideal, nadir) > 0.005 else 0) for ideal, nadir in zip(self.running_history['delta_ideal'], self.running_history['delta_nadir'])]
+            
+            self.running_data.append((tau, x, f, v))
+        database._close_connection()
+        end_time = datetime.now() # current date and time
+        end_date_time = end_time.strftime("%H:%M:%S")
+        print("Importing from sqlite finished at: "+end_date_time)
+        total_time = datetime.strptime(end_date_time, "%H:%M:%S") - datetime.strptime(start_date_time, "%H:%M:%S")
+        print(f"Importation lasted: {total_time.total_seconds()} seconds")
 
 class HistoryCallback(Callback):
     def __init__(self) -> None:
         super().__init__()
-        self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]}
-        self.running_data = []
-        self.history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []}
+        self.database = DatabaseMultiOpt()   
+        self.database._create_db()  
+        self.title = (datetime.now()).strftime("Iteration_%m%d%Y_%H%M%S")
 
     def notify(self, algorithm):
         F = algorithm.pop.get("F")
-        c_F, c_ideal, c_nadir = F, F.min(axis=0), F.max(axis=0)
-
-        # the current norm that should be used for normalization
-        norm = c_nadir - c_ideal
-        norm[norm < 1e-32] = 1.0
-
-        # normalize the current objective space values
-        c_N = normalize(c_F, c_ideal, c_nadir)
-
-        # normalize all previous generations with respect to current ideal and nadir
-        N = [normalize(e["F"], c_ideal, c_nadir) for e in self.running_history['history']]
+        running_history = dict(F=F, ideal=F.min(axis=0), nadir=F.max(axis=0))
         
-        # append the current optimum to the history
-        self.running_history['history'].append(dict(F=F, ideal=c_ideal, nadir=c_nadir))
-
-        self.running_history['delta_ideal'] = [calc_delta_norm(self.running_history['history'][k]["ideal"], self.running_history['history'][k-1]["ideal"], norm) for k in range(1, len(self.running_history['history']))] + [0.0]
-        self.running_history['delta_nadir'] = [calc_delta_norm(self.running_history['history'][k]["nadir"], self.running_history['history'][k-1]["nadir"], norm) for k in range(1, len(self.running_history['history']))] + [0.0]
-
-        delta_f = [IGD(c_N).do(N[k]) for k in range(len(N))]
-
-        tau = algorithm.n_gen
-        f = delta_f
-        x = np.arange(len(f)) + 1
-        v = [max(ideal, nadir) > 0.005 for ideal, nadir in zip(self.running_history['delta_ideal'], self.running_history['delta_nadir'])]
-       
-        self.running_data.append((tau, x, f, v))
-
+        history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []}
         # store the number of function evaluations
-        self.history_data["n_evals"].append(algorithm.evaluator.n_eval)
+        history_data["n_evals"].append(algorithm.evaluator.n_eval)
     
         # retrieve the optimum from the algorithm
         optmulti= algorithm.opt
     
         # store the least contraint violation and the average in each population
-        self.history_data["hist_cv"].append(optmulti.get("CV").min())
-        self.history_data["hist_cv_avg"].append(algorithm.pop.get("CV").mean())
+        history_data["hist_cv"].append(optmulti.get("CV").min())
+        history_data["hist_cv_avg"].append(algorithm.pop.get("CV").mean())
     
         # filter out only the feasible and append and objective space values
         feas = np.where(optmulti.get("feasible"))[0]
-        self.history_data["hist_F"].append(optmulti.get("F")[feas])
+        history_data["hist_F"].append(optmulti.get("F")[feas])
+
+        self.database.insert_iteration((self.title, algorithm.n_gen, json.dumps(running_history, indent=2, cls=NumpyArrayEncoder), json.dumps(history_data, indent=2, cls=NumpyArrayEncoder)))
 
 class DummyCallback(Callback):
     def __init__(self) -> None:
