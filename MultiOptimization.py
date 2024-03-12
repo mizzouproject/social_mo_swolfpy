@@ -30,6 +30,8 @@ import shutup; shutup.please()
 from datetime import datetime
 
 import matplotlib.pyplot as plt
+import matplotlib.cbook as cbook
+import matplotlib.image as image
 import oapackage
 from oapackage.oahelper import create_pareto_element
 from sklearn import preprocessing
@@ -38,6 +40,8 @@ import json
 from json import JSONEncoder
 
 from .Topsis import Topsis
+
+from pathlib import Path
 
 class MultiOptimization():
     def __init__(self, functional_unit, method, project, bw2_fu):
@@ -76,6 +80,9 @@ class MultiOptimization():
         self.history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []}      # self.get_history() of a previous run of the optimization when uploaded from a json
         self.result_topsis = []         # save the output of function get_topsis
         self.individual_topsis = []     # indexes of the individuals from results
+
+        self.not_feas_image = Path(__file__).parent / 'not_feas.png'
+        self.not_feas = True
     
     def config(self, project):
         """Iterate each Optimization object and call config function of each one
@@ -138,6 +145,7 @@ class MultiOptimization():
         self.running_data = []
         self.running_history = {'history':[], 'delta_nadir':[], 'delta_ideal':[]}
         self.history_data = { 'n_evals': [], 'hist_F': [], 'hist_cv': [], 'hist_cv_avg': []}
+        self.not_feas = True
         """
         Initialization of each Optimization object inside the optimization_list
         """   
@@ -293,7 +301,7 @@ class MultiOptimization():
                 results = self.results
         
             if len(fileName) > 0:
-                results.to_csv(fileName+'.csv')
+                results.to_csv(fileName+('_Not_Feasible' if self.not_feas else '')+'.csv')
         return(results)
 
     def test_pareto(self, value=None, show=False):
@@ -337,6 +345,10 @@ class MultiOptimization():
             y1_name (string): Objective function to plot on left y axis
             y2_name (string): Objective function to plot on right y axis
         """
+        if self.not_feas:
+            print("NOT FEASIBLE, IMAGE IS NOT AVAILABLE.")
+            return
+
         results = self.report_res()
         data_to_plot = results.T.drop(index='unit')
         names = data_to_plot.columns
@@ -380,6 +392,10 @@ class MultiOptimization():
             y_name (string): Objective function to plot in y axis
             z_name (string): Objective function to plot in z axis
         """
+        if self.not_feas:
+            print("NOT FEASIBLE, IMAGE IS NOT AVAILABLE.")
+            return
+
         results = self.report_res()
         data_to_plot = results.T.drop(index='unit')
         names = data_to_plot.columns
@@ -405,7 +421,7 @@ class MultiOptimization():
         xdata = normalized_base_data.T[0]
         ydata = normalized_base_data.T[1]
         
-        ax.scatter3D(xdata, ydata, zdata);
+        ax.scatter3D(xdata, ydata, zdata)
     
         ax.set_xlabel(x_name, fontsize=10, labelpad=13)
         ax.set_ylabel(y_name, fontsize=10, labelpad=13)
@@ -419,6 +435,10 @@ class MultiOptimization():
         Args:
             column_names (list): e.g. [('Total cost','Social cost'),('Total cost', 'GWP')]
         """
+        if self.not_feas:
+            print("NOT FEASIBLE, IMAGE IS NOT AVAILABLE.")
+            return
+
         results = self.report_res()
         data_to_plot = results.T.drop(index='unit')
         names = data_to_plot.columns
@@ -552,6 +572,10 @@ class MultiOptimization():
             ax2.set_yticklabels(tuple('' for _ in range(number_individuals)))
             ax2.legend(labels=['Diversion'], loc='lower right', bbox_to_anchor=(1.25, 1))
         
+        if self.not_feas:
+            with cbook.get_sample_data(self.not_feas_image) as file:
+                im = image.imread(file)
+            fig.figimage(im, 300, 250, zorder=3, alpha=.3)
         plt.show()
         
     def helper_dataframe_to_tuple(self, value, individual=None):
@@ -584,6 +608,11 @@ class MultiOptimization():
         if self.has_history == False and self.imported_from_json == False:
             print("No history was saved on the result object of the algorithm")
             return
+
+        if self.not_feas:
+            print("NOT FEASIBLE, IMAGE IS NOT AVAILABLE.")
+            return
+
         if self.imported_from_json:
             history = self.history_data
         else:
@@ -657,6 +686,10 @@ class MultiOptimization():
             list: Ranking of individuals. One ranking per each weight.
 
         """
+        if self.not_feas:
+            print("NOT FEASIBLE, IMAGE IS NOT AVAILABLE.")
+            return
+
         if self.has_result == False:
             print("The optimization doesn't have results, topsis can not be calculated.")
             return
@@ -713,6 +746,11 @@ class MultiOptimization():
         if len(self.result_topsis) == 0:
             print("Please, first execute get_topsis function with the weights")
             return
+
+        if self.not_feas:
+            print("NOT FEASIBLE, IMAGE IS NOT AVAILABLE.")
+            return
+
         colors = {0:'gold',1:'darkorange',2:'blue',3:'limegreen',4:'red',5:'violet', 6:'green', 7:'brown'}
         x_axis = list(range(1,len(self.result_topsis[0]['data'])+1))
 
@@ -743,6 +781,10 @@ class MultiOptimization():
         """
         if self.has_history == False:
             print("No history was saved on the result object of the algorithm")
+            return
+
+        if self.not_feas:
+            print("NOT FEASIBLE, IMAGE IS NOT AVAILABLE.")
             return
 
         if n_plots * delta_gen > len(self.running_data):
@@ -805,7 +847,7 @@ class MultiOptimization():
         for k, v in optElem.scheme_vars_dict.items():
             optElem.optimized_x.append({'name': v,
                         'amount': result[individual-1][k]})
-        optElem.plot_sankey(fileName=fileName)
+        optElem.plot_sankey(fileName=fileName + ('_Not_Feasible' if self.not_feas else ''))
 
     def export_to_json(self, filename):
         if self.imported_from_json and self.has_result:
@@ -837,6 +879,10 @@ class MultiOptimization():
             self.res.F = data['F']
             self.res.G = data['G']
             self.history_data = data['history_data']
+            for d in self.history_data['hist_F']:
+                if len(d) > 0:
+                    self.not_feas = False
+                    break
             self.running_data = data['running_data']
             self.running_history = data['running_history']
             self.igd = data['igd']   
@@ -906,6 +952,8 @@ class MultiOptimization():
             history_data = json.loads(d[3])
             self.history_data['n_evals'].append(np.array(history_data['n_evals']))
             self.history_data['hist_F'].append(np.array(history_data['hist_F']))
+            if len(history_data['hist_F'][0]) > 0:
+                self.not_feas = False
             self.history_data['hist_cv'].append(np.array(history_data['hist_cv']))
             self.history_data['hist_cv_avg'].append(np.array(history_data['hist_cv_avg']))
 
